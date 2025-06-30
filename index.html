@@ -37,6 +37,47 @@
                               linear-gradient(90deg, #ddd 1px, transparent 1px);
             background-size: 20px 20px;
         }
+        #image-upload {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+/* Estilo para el modal de carga */
+.loading-image {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.loading-spinner {
+    border: 4px solid rgba(0, 0, 0, 0.1);
+    border-radius: 50%;
+    border-top: 4px solid #3b82f6;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin-bottom: 10px;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
         #export-modal {
             transition: opacity 0.3s ease;
         }
@@ -274,6 +315,9 @@
                 <button id="close-menu" class="text-2xl">×</button>
             </div>
             <div class="space-y-4">
+                <button id="mobile-import-btn" class="w-full px-4 py-3 bg-blue-400 text-white rounded-lg text-left flex items-center">
+                    <span class="mr-2">🖼️</span> Importar Imagen
+                </button>
                 <button id="mobile-open-btn" class="w-full px-4 py-3 bg-blue-500 text-white rounded-lg text-left flex items-center">
                     <span class="mr-2">📂</span> Abrir Dibujo
                 </button>
@@ -356,6 +400,110 @@
             let panStartX, panStartY;
             let isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints;
 
+            document.getElementById('mobile-import-btn').addEventListener('click', function() {
+    // Simulamos el click en el input file real
+    document.getElementById('image-upload').click();
+    mobileMenu.classList.add('hidden');
+});
+
+// Mejoramos la función de importación para móviles
+imageUpload.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Crear elemento de carga
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'loading-image';
+    loadingDiv.innerHTML = `
+        <div class="loading-spinner"></div>
+        <p>Cargando imagen...</p>
+    `;
+    document.body.appendChild(loadingDiv);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            // Ajuste automático de tamaño para móviles
+            const maxWidth = window.innerWidth * 0.8;
+            const maxHeight = window.innerHeight * 0.6;
+            let width = img.width;
+            let height = img.height;
+            
+            if (width > maxWidth || height > maxHeight) {
+                const ratio = Math.min(maxWidth / width, maxHeight / height);
+                width = Math.floor(width * ratio);
+                height = Math.floor(height * ratio);
+            }
+
+            // Posición centrada
+            const centerX = (canvas.width / scale - width) / 2 - offsetX / scale;
+            const centerY = (canvas.height / scale - height) / 2 - offsetY / scale;
+
+            layers[currentLayerIndex].objects.push({
+                type: 'image',
+                x: centerX,
+                y: centerY,
+                width: width,
+                height: height,
+                src: e.target.result,
+                originalWidth: img.width,
+                originalHeight: img.height
+            });
+            
+            renderCanvas();
+            document.body.removeChild(loadingDiv);
+            
+            // Feedback háptico
+            if (window.navigator.vibrate) {
+                window.navigator.vibrate(50);
+            }
+        };
+        img.onerror = () => {
+            document.body.removeChild(loadingDiv);
+            alert('Error al cargar la imagen');
+        };
+        img.src = e.target.result;
+    };
+    reader.onerror = () => {
+        document.body.removeChild(loadingDiv);
+        alert('Error al leer el archivo');
+    };
+    reader.readAsDataURL(file);
+});
+function setupImageResizing() {
+    canvas.addEventListener('dblclick', (e) => {
+        if (currentTool !== 'select') return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - offsetX) / scale;
+        const y = (e.clientY - rect.top - offsetY) / scale;
+        
+        // Buscar una imagen en las coordenadas
+        for (let i = layers.length - 1; i >= 0; i--) {
+            if (!layers[i].visible) continue;
+            
+            for (let j = layers[i].objects.length - 1; j >= 0; j--) {
+                const obj = layers[i].objects[j];
+                if (obj.type === 'image' && 
+                    x >= obj.x && x <= obj.x + obj.width &&
+                    y >= obj.y && y <= obj.y + obj.height) {
+                    
+                    const newWidth = prompt('Ancho (px):', obj.width);
+                    if (newWidth && !isNaN(newWidth)) {
+                        const ratio = obj.height / obj.width;
+                        obj.width = parseInt(newWidth);
+                        obj.height = Math.floor(obj.width * ratio);
+                        renderCanvas();
+                    }
+                    return;
+                }
+            }
+        }
+    });
+}
+
+// Llama a esta función en initCanvas()
             // Initialize canvas
             function initCanvas() {
                 resizeCanvas();
