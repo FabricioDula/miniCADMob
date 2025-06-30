@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MiniCAD - Herramienta de dibujo 2D</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/svg2pdf.js/1.4.0/svg2pdf.umd.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        canvas {
+            background-color: #f5f5f5;
+            touch-action: none;
+        }
+        .tool-btn.active {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .layer-item.active {
+            background-color: #e0e7ff;
+        }
+        #drawing-area {
+            position: relative;
+            overflow: hidden;
+        }
+        .grid-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            background-image: linear-gradient(#ddd 1px, transparent 1px),
+                              linear-gradient(90deg, #ddd 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        #export-modal {
+            transition: opacity 0.3s ease;
+        }
+        
+        /* Estilos para móviles */
+        @media (max-width: 768px) {
+            #app-container {
+                flex-direction: column;
+            }
+            
+            #tools-panel {
+                width: 100%;
+                flex-direction: row;
+                overflow-x: auto;
+                height: auto;
+                padding: 8px;
+                order: 2;
+            }
+            
+            #layers-panel {
+                width: 100%;
+                order: 3;
+            }
+            
+            .tool-btn {
+                min-width: 40px;
+                margin: 0 4px;
+            }
+            
+            #drawing-area {
+                order: 1;
+                width: 100%;
+                height: 60vh;
+            }
+            
+            footer {
+                font-size: 12px;
+                order: 4;
+            }
+            
+            .mobile-only {
+                display: block;
+            }
+            
+            .desktop-only {
+                display: none;
+            }
+        }
+        
+        @media (min-width: 769px) {
+            .mobile-only {
+                display: none;
+            }
+            
+            .desktop-only {
+                display: block;
+            }
+        }
+        
+        /* Mejoras para touch */
+        canvas:active {
+            cursor: pointer;
+        }
+        
+        .tool-btn:active {
+            transform: scale(0.9);
+            transition: transform 0.1s;
+        }
+        
+        /* Menú móvil */
+        #mobile-tools {
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            #mobile-tools {
+                display: flex;
+            }
+            
+            #tools-panel {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <!-- Home Screen -->
+    <div id="home-screen" class="flex flex-col h-screen items-center justify-center space-y-4 p-4">
+        <h1 class="text-3xl font-bold text-blue-600 mb-8">MiniCAD</h1>
+        <div id="drawings-list" class="w-full max-w-2xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+            <!-- Drawings will appear here -->
+        </div>
+        <button id="new-drawing-btn" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 active:bg-blue-700">
+            Nuevo Dibujo
+        </button>
+    </div>
+
+    <!-- Main App (hidden initially) -->
+    <div id="app-container" class="flex flex-col h-screen" style="display: none;">
+        <!-- Header -->
+        <header class="bg-white shadow-sm py-2 px-4 flex justify-between items-center">
+            <div class="flex items-center">
+                <h1 class="text-xl font-bold text-blue-600">MiniCAD</h1>
+            </div>
+            <div class="flex space-x-2">
+                <button id="menu-toggle" class="mobile-only px-3 py-1 bg-gray-200 rounded">☰</button>
+                <button id="open-btn" class="desktop-only px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 active:bg-blue-700">Abrir</button>
+                <button id="save-btn" class="desktop-only px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 active:bg-green-700">Guardar</button>
+                <button id="export-btn" class="px-3 py-1 bg-purple-500 text-white rounded hover:bg-purple-600 active:bg-purple-700">Exportar</button>
+                <button id="clear-btn" class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 active:bg-red-500">Limpiar</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="flex-1 overflow-hidden flex flex-col md:flex-row">
+            <!-- Tools Panel -->
+            <div id="tools-panel" class="w-16 bg-white shadow-sm flex flex-col items-center py-4 space-y-4">
+                <button data-tool="select" class="tool-btn p-2 rounded hover:bg-gray-200 active">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                        <polyline points="13 2 13 9 20 9"></polyline>
+                    </svg>
+                </button>
+                <button data-tool="line" class="tool-btn p-2 rounded hover:bg-gray-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button data-tool="rect" class="tool-btn p-2 rounded hover:bg-gray-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    </svg>
+                </button>
+                <button data-tool="circle" class="tool-btn p-2 rounded hover:bg-gray-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                    </svg>
+                </button>
+                <button data-tool="eraser" class="tool-btn p-2 rounded hover:bg-gray-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M7 21h10"></path>
+                        <path d="M12 21l8-8"></path>
+                        <path d="M3 13l8-8 5 5-8 8z"></path>
+                    </svg>
+                </button>
+                <button data-tool="pan" class="tool-btn p-2 rounded hover:bg-gray-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 6L6 18"></path>
+                        <path d="M6 6l12 12"></path>
+                    </svg>
+                </button>
+                <div class="border-t pt-4 mt-4 w-full flex flex-col items-center">
+                    <input type="color" id="color-picker" value="#000000" class="w-8 h-8 cursor-pointer">
+                    <input type="file" id="image-upload" accept="image/*" class="hidden">
+                    <button id="import-btn" class="mt-2 p-1 text-xs bg-gray-200 rounded active:bg-gray-300">Importar Imagen</button>
+                    <input type="range" id="line-width" min="1" max="10" value="2" class="mt-2 w-12">
+                </div>
+            </div>
+
+            <!-- Drawing Area -->
+            <div class="flex-1 relative" id="drawing-area">
+                <div class="grid-overlay w-full h-full"></div>
+                <canvas id="main-canvas"></canvas>
+            </div>
+
+            <!-- Layers Panel -->
+            <div id="layers-panel" class="w-48 bg-white shadow-sm p-4 overflow-y-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="font-bold">Capas</h2>
+                    <button id="add-layer" class="text-blue-500 hover:text-blue-700 active:text-blue-800">+</button>
+                </div>
+                <div id="layers-list" class="space-y-2">
+                    <div class="layer-item active p-2 rounded cursor-pointer flex justify-between items-center">
+                        <span>Capa 1</span>
+                        <div class="flex space-x-1">
+                            <button class="toggle-visibility text-gray-500 hover:text-gray-700" data-index="0">👁️</button>
+                            <button class="delete-layer text-gray-500 hover:text-gray-700" data-index="0">🗑️</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Tools -->
+        <div id="mobile-tools" class="fixed bottom-4 left-0 right-0 flex justify-center space-x-2 p-2 bg-white/80 backdrop-blur-sm rounded-full mx-4 shadow-lg">
+            <button data-tool="select" class="tool-btn p-3 bg-white rounded-full shadow active">✏️</button>
+            <button data-tool="line" class="tool-btn p-3 bg-white rounded-full shadow">📏</button>
+            <button data-tool="rect" class="tool-btn p-3 bg-white rounded-full shadow">⬛</button>
+            <button data-tool="circle" class="tool-btn p-3 bg-white rounded-full shadow">🔴</button>
+            <button data-tool="eraser" class="tool-btn p-3 bg-white rounded-full shadow">🧽</button>
+            <button data-tool="pan" class="tool-btn p-3 bg-white rounded-full shadow">✋</button>
+        </div>
+
+        <!-- Status Bar -->
+        <footer class="bg-white shadow-sm px-4 py-1 text-sm text-gray-600 flex justify-between">
+            <div>Coordenadas: <span id="coords">0, 0</span></div>
+            <div>Escala: <span id="zoom-level">100%</span></div>
+        </footer>
+    </div>
+
+    <!-- Export Modal -->
+    <div id="export-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg p-6 w-96 max-w-full mx-4">
+            <h2 class="text-xl font-bold mb-4">Exportar Dibujo</h2>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Formato</label>
+                    <select id="export-format" class="w-full p-2 border rounded">
+                        <option value="png">PNG (Imagen)</option>
+                        <option value="jpeg">JPEG (Imagen)</option>
+                        <option value="svg">SVG (Vectorial)</option>
+                        <option value="pdf">PDF (Documento)</option>
+                        <option value="json">JSON (MiniCAD)</option>
+                    </select>
+                </div>
+                
+                <div id="export-options" class="space-y-2">
+                    <!-- Options will be added dynamically -->
+                </div>
+                
+                <div class="flex justify-end space-x-2 pt-4">
+                    <button id="cancel-export" class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400 active:bg-gray-500">Cancelar</button>
+                    <button id="confirm-export" class="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 active:bg-purple-700">Exportar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Menu Modal -->
+    <div id="mobile-menu" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden" style="backdrop-filter: blur(2px);">
+        <div class="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl p-6 pt-4 shadow-xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold">Menú</h2>
+                <button id="close-menu" class="text-2xl">×</button>
+            </div>
+            <div class="space-y-4">
+                <button id="mobile-open-btn" class="w-full px-4 py-3 bg-blue-500 text-white rounded-lg text-left flex items-center">
+                    <span class="mr-2">📂</span> Abrir Dibujo
+                </button>
+                <button id="mobile-save-btn" class="w-full px-4 py-3 bg-green-500 text-white rounded-lg text-left flex items-center">
+                    <span class="mr-2">💾</span> Guardar Dibujo
+                </button>
+                <button id="mobile-layers-btn" class="w-full px-4 py-3 bg-yellow-500 text-white rounded-lg text-left flex items-center">
+                    <span class="mr-2">🖼️</span> Mostrar Capas
+                </button>
+                <button id="mobile-tools-btn" class="w-full px-4 py-3 bg-indigo-500 text-white rounded-lg text-left flex items-center">
+                    <span class="mr-2">🛠️</span> Mostrar Herramientas
+                </button>
+                <button id="mobile-home-btn" class="w-full px-4 py-3 bg-gray-500 text-white rounded-lg text-left flex items-center">
+                    <span class="mr-2">🏠</span> Volver al Inicio
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Canvas setup
+            const canvas = document.getElementById('main-canvas');
+            const ctx = canvas.getContext('2d');
+            const drawingArea = document.getElementById('drawing-area');
+            const coordsDisplay = document.getElementById('coords');
+            const zoomLevel = document.getElementById('zoom-level');
+            
+            // Tool buttons
+            const toolButtons = document.querySelectorAll('.tool-btn');
+            const colorPicker = document.getElementById('color-picker');
+            const importBtn = document.getElementById('import-btn');
+            const imageUpload = document.getElementById('image-upload');
+            const lineWidth = document.getElementById('line-width');
+            
+            // Layers
+            const layersList = document.getElementById('layers-list');
+            const addLayerBtn = document.getElementById('add-layer');
+            
+            // File operations
+            const openBtn = document.getElementById('open-btn');
+            const saveBtn = document.getElementById('save-btn');
+            const exportBtn = document.getElementById('export-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            
+            // Mobile buttons
+            const mobileOpenBtn = document.getElementById('mobile-open-btn');
+            const mobileSaveBtn = document.getElementById('mobile-save-btn');
+            const mobileLayersBtn = document.getElementById('mobile-layers-btn');
+            const mobileToolsBtn = document.getElementById('mobile-tools-btn');
+            const mobileHomeBtn = document.getElementById('mobile-home-btn');
+            const menuToggle = document.getElementById('menu-toggle');
+            const mobileMenu = document.getElementById('mobile-menu');
+            const closeMenu = document.getElementById('close-menu');
+            
+            // Export functionality
+            const exportModal = document.getElementById('export-modal');
+            const exportFormat = document.getElementById('export-format');
+            const exportOptions = document.getElementById('export-options');
+            const cancelExport = document.getElementById('cancel-export');
+            const confirmExport = document.getElementById('confirm-export');
+
+            // State variables
+            let currentTool = 'select';
+            let isDrawing = false;
+            let startX, startY;
+            let currentColor = colorPicker.value;
+            let currentLineWidth = lineWidth.value;
+            let scale = 1;
+            let offsetX = 0;
+            let offsetY = 0;
+            let layers = [{
+                name: 'Capa 1',
+                visible: true,
+                objects: []
+            }];
+            let currentLayerIndex = 0;
+            let selectedObject = null;
+            let isPanning = false;
+            let panStartX, panStartY;
+            let isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints;
+
+            // Initialize canvas
+            function initCanvas() {
+                resizeCanvas();
+                window.addEventListener('resize', resizeCanvas);
+                window.addEventListener('orientationchange', resizeCanvas);
+                renderCanvas();
+                
+                // Setup touch events if needed
+                if (isTouchDevice) {
+                    setupTouchEvents();
+                }
+            }
+
+            function resizeCanvas() {
+                let width, height;
+                
+                if (window.innerWidth <= 768) {
+                    // Mobile layout
+                    width = window.innerWidth;
+                    height = window.innerHeight * 0.6; // 60% of screen height
+                } else {
+                    // Desktop layout
+                    width = drawingArea.clientWidth;
+                    height = drawingArea.clientHeight;
+                }
+                
+                // Adjust for high DPI screens
+                const pixelRatio = window.devicePixelRatio || 1;
+                canvas.width = width * pixelRatio;
+                canvas.height = height * pixelRatio;
+                canvas.style.width = width + 'px';
+                canvas.style.height = height + 'px';
+                
+                ctx.scale(pixelRatio, pixelRatio);
+                renderCanvas();
+            }
+
+            function renderCanvas() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.save();
+                ctx.translate(offsetX, offsetY);
+                ctx.scale(scale, scale);
+
+                // Draw grid (simpler grid on mobile)
+                drawGrid();
+
+                // Draw all objects from all visible layers
+                layers.forEach(layer => {
+                    if (layer.visible) {
+                        layer.objects.forEach(obj => {
+                            drawObject(obj);
+                        });
+                    }
+                });
+
+                ctx.restore();
+            }
+
+            function drawGrid() {
+                ctx.strokeStyle = '#ddd';
+                ctx.lineWidth = 1;
+                
+                const gridSize = isTouchDevice ? 40 : 20; // Larger grid on touch devices
+                const startX = Math.floor(-offsetX / scale / gridSize) * gridSize;
+                const startY = Math.floor(-offsetY / scale / gridSize) * gridSize;
+                const endX = startX + Math.ceil(canvas.width / scale) + gridSize;
+                const endY = startY + Math.ceil(canvas.height / scale) + gridSize;
+
+                for (let x = startX; x < endX; x += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, startY);
+                    ctx.lineTo(x, endY);
+                    ctx.stroke();
+                }
+
+                for (let y = startY; y < endY; y += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(startX, y);
+                    ctx.lineTo(endX, y);
+                    ctx.stroke();
+                }
+            }
+
+            function drawObject(obj) {
+                if (obj.type === 'image') {
+                    const img = new Image();
+                    img.src = obj.src;
+                    ctx.drawImage(img, obj.x, obj.y, obj.width, obj.height);
+                    return;
+                }
+
+                ctx.strokeStyle = obj.color;
+                ctx.lineWidth = obj.lineWidth;
+                ctx.beginPath();
+
+                switch (obj.type) {
+                    case 'line':
+                        ctx.moveTo(obj.startX, obj.startY);
+                        ctx.lineTo(obj.endX, obj.endY);
+                        if (obj.text) {
+                            ctx.fillStyle = obj.color;
+                            ctx.font = `${Math.min(16, Math.max(8, obj.lineWidth + 4))}px Arial`;
+                            const midX = (obj.startX + obj.endX) / 2;
+                            const midY = (obj.startY + obj.endY) / 2;
+                            ctx.fillText(obj.text, midX + 5, midY);
+                        }
+                        break;
+                    case 'rect':
+                        ctx.rect(obj.startX, obj.startY, obj.width, obj.height);
+                        if (obj.text) {
+                            ctx.fillStyle = obj.color;
+                            ctx.font = `${Math.min(16, Math.max(8, obj.lineWidth + 4))}px Arial`;
+                            ctx.fillText(obj.text, obj.startX + 5, obj.startY + 15);
+                        }
+                        break;
+                    case 'circle':
+                        const radius = Math.sqrt(
+                            Math.pow(obj.endX - obj.startX, 2) + 
+                            Math.pow(obj.endY - obj.startY, 2)
+                        );
+                        ctx.arc(obj.startX, obj.startY, radius, 0, Math.PI * 2);
+                        if (obj.text) {
+                            ctx.fillStyle = obj.color;
+                            ctx.font = `${Math.min(16, Math.max(8, obj.lineWidth + 4))}px Arial`;
+                            ctx.fillText(obj.text, obj.startX + radius + 5, obj.startY);
+                        }
+                        break;
+                }
+                ctx.stroke();
+            }
+
+            // Touch event handling
+            function setupTouchEvents() {
+                const getCanvasCoords = (clientX, clientY) => {
+                    const rect = canvas.getBoundingClientRect();
+                    return {
+                        x: (clientX - rect.left - offsetX) / scale,
+                        y: (clientY - rect.top - offsetY) / scale
+                    };
+                };
+                
+                // Single touch (drawing)
+                canvas.addEventListener('touchstart', (e) => {
+                    if (e.touches.length === 1) {
+                        e.preventDefault();
+                        const touch = e.touches[0];
+                        const mouseEvent = new MouseEvent('mousedown', {
+                            clientX: touch.clientX,
+                            clientY: touch.clientY
+                        });
+                        canvas.dispatchEvent(mouseEvent);
+                    } else if (e.touches.length === 2) {
+                        e.preventDefault();
+                        initialDistance = getDistance(e.touches[0], e.touches[1]);
+                    }
+                }, {passive: false});
+                
+                canvas.addEventListener('touchmove', (e) => {
+                    if (e.touches.length === 1 && !isPanning) {
+                        e.preventDefault();
+                        const touch = e.touches[0];
+                        const mouseEvent = new MouseEvent('mousemove', {
+                            clientX: touch.clientX,
+                            clientY: touch.clientY
+                        });
+                        canvas.dispatchEvent(mouseEvent);
+                    } else if (e.touches.length === 2) {
+                        handlePinchZoom(e);
+                    }
+                }, {passive: false});
+                
+                canvas.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    const mouseEvent = new MouseEvent('mouseup', {});
+                    canvas.dispatchEvent(mouseEvent);
+                    initialDistance = null;
+                });
+                
+                // Double tap to reset zoom
+                let lastTap = 0;
+                canvas.addEventListener('touchend', (e) => {
+                    const currentTime = new Date().getTime();
+                    const tapLength = currentTime - lastTap;
+                    if (tapLength < 300 && tapLength > 0) {
+                        // Double tap detected
+                        resetZoom();
+                    }
+                    lastTap = currentTime;
+                });
+            }
+            
+            function resetZoom() {
+                scale = 1;
+                offsetX = 0;
+                offsetY = 0;
+                zoomLevel.textContent = "100%";
+                renderCanvas();
+            }
+            
+            let initialDistance = null;
+            
+            function handlePinchZoom(e) {
+                e.preventDefault();
+                const currentDistance = getDistance(e.touches[0], e.touches[1]);
+                
+                if (initialDistance === null) {
+                    initialDistance = currentDistance;
+                    return;
+                }
+                
+                const zoomFactor = currentDistance / initialDistance;
+                
+                const rect = canvas.getBoundingClientRect();
+                const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+                const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+                
+                // Apply zoom
+                const newScale = Math.min(Math.max(0.1, scale * zoomFactor), 5);
+                offsetX = centerX - (centerX - offsetX) * (newScale / scale);
+                offsetY = centerY - (centerY - offsetY) * (newScale / scale);
+                scale = newScale;
+                
+                initialDistance = currentDistance;
+                zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+                renderCanvas();
+            }
+            
+            function getDistance(touch1, touch2) {
+                return Math.hypot(
+                    touch2.clientX - touch1.clientX,
+                    touch2.clientY - touch1.clientY
+                );
+            }
+
+            // Mouse event handling
+            function handleMouseDown(e) {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left - offsetX) / scale;
+                const y = (e.clientY - rect.top - offsetY) / scale;
+                coordsDisplay.textContent = `${Math.round(x)}, ${Math.round(y)}`;
+
+                if (currentTool === 'pan') {
+                    isPanning = true;
+                    panStartX = e.clientX - offsetX;
+                    panStartY = e.clientY - offsetY;
+                    canvas.style.cursor = 'grabbing';
+                    return;
+                }
+
+                if (currentTool === 'select') {
+                    selectedObject = findObjectAt(x, y);
+                    if (selectedObject) {
+                        const text = prompt('Ingrese el texto para este objeto:', selectedObject.text || '');
+                        if (text !== null) {
+                            selectedObject.text = text;
+                            renderCanvas();
+                        }
+                    }
+                    return;
+                }
+
+                isDrawing = true;
+                startX = x;
+                startY = y;
+
+                if (currentTool !== 'select') {
+                    layers[currentLayerIndex].objects.push({
+                        type: currentTool,
+                        startX: x,
+                        startY: y,
+                        endX: x,
+                        endY: y,
+                        color: currentColor,
+                        lineWidth: currentLineWidth
+                    });
+                }
+            }
+
+            function handleMouseMove(e) {
+                const rect = canvas.getBoundingClientRect();
+                const canvasX = (e.clientX - rect.left - offsetX) / scale;
+                const canvasY = (e.clientY - rect.top - offsetY) / scale;
+
+                coordsDisplay.textContent = `${Math.round(canvasX)}, ${Math.round(canvasY)}`;
+
+                if (currentTool === 'pan' && isPanning) {
+                    offsetX = e.clientX - panStartX;
+                    offsetY = e.clientY - panStartY;
+                    renderCanvas();
+                    return;
+                }
+
+                if (!isDrawing) return;
+
+                if (currentTool === 'select') {
+                    return;
+                }
+
+                if (currentTool === 'eraser') {
+                    const eraseRadius = currentLineWidth * 5;
+                    ctx.save();
+                    ctx.translate(offsetX, offsetY);
+                    ctx.scale(scale, scale);
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.beginPath();
+                    ctx.arc(canvasX, canvasY, eraseRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                    
+                    layers.forEach(layer => {
+                        if (layer.visible) {
+                            layer.objects = layer.objects.filter(obj => {
+                                if (obj.type === 'line') {
+                                    return !isPointNearLine(canvasX, canvasY, obj, eraseRadius);
+                                } else if (obj.type === 'rect') {
+                                    return !isPointInRect(canvasX, canvasY, obj);
+                                } else if (obj.type === 'circle') {
+                                    return !isPointInCircle(canvasX, canvasY, obj);
+                                }
+                                return true;
+                            });
+                        }
+                    });
+                    renderCanvas();
+                    return;
+                }
+
+                const currentObj = layers[currentLayerIndex].objects[layers[currentLayerIndex].objects.length - 1];
+                currentObj.endX = canvasX;
+                currentObj.endY = canvasY;
+
+                if (currentTool === 'rect') {
+                    currentObj.width = canvasX - startX;
+                    currentObj.height = canvasY - startY;
+                }
+
+                renderCanvas();
+            }
+
+            function handleMouseUp() {
+                isDrawing = false;
+                if (currentTool === 'pan') {
+                    isPanning = false;
+                    canvas.style.cursor = 'grab';
+                }
+            }
+
+            function handleWheel(e) {
+                e.preventDefault();
+                
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const zoomIntensity = 0.1;
+                const delta = e.deltaY > 0 ? -zoomIntensity : zoomIntensity;
+                
+                const newScale = Math.min(Math.max(0.1, scale + delta), 5);
+                
+                if (newScale !== scale) {
+                    offsetX = mouseX - (mouseX - offsetX) * (newScale / scale);
+                    offsetY = mouseY - (mouseY - offsetY) * (newScale / scale);
+                    
+                    scale = newScale;
+                    zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+                    renderCanvas();
+                }
+            }
+
+            // Object detection utilities
+            function findObjectAt(x, y) {
+                for (let i = layers.length - 1; i >= 0; i--) {
+                    const layer = layers[i];
+                    if (!layer.visible) continue;
+                    
+                    for (let j = layer.objects.length - 1; j >= 0; j--) {
+                        const obj = layer.objects[j];
+                        if (obj.type === 'line' && isPointNearLine(x, y, obj, 10)) {
+                            return obj;
+                        } else if (obj.type === 'rect' && isPointInRect(x, y, obj)) {
+                            return obj;
+                        } else if (obj.type === 'circle' && isPointInCircle(x, y, obj)) {
+                            return obj;
+                        }
+                    }
+                }
+                return null;
+            }
+
+            function isPointNearLine(x, y, line, radius) {
+                const d = distanceToLine(x, y, line.startX, line.startY, line.endX, line.endY);
+                return d <= radius;
+            }
+
+            function distanceToLine(x, y, x1, y1, x2, y2) {
+                const A = x - x1;
+                const B = y - y1;
+                const C = x2 - x1;
+                const D = y2 - y1;
+
+                const dot = A * C + B * D;
+                const len_sq = C * C + D * D;
+                const param = len_sq !== 0 ? dot / len_sq : -1;
+
+                let xx, yy;
+
+                if (param < 0) {
+                    xx = x1;
+                    yy = y1;
+                } else if (param > 1) {
+                    xx = x2;
+                    yy = y2;
+                } else {
+                    xx = x1 + param * C;
+                    yy = y1 + param * D;
+                }
+
+                const dx = x - xx;
+                const dy = y - yy;
+                return Math.sqrt(dx * dx + dy * dy);
+            }
+
+            function isPointInRect(x, y, rect) {
+                return x >= rect.startX && x <= rect.startX + rect.width &&
+                       y >= rect.startY && y <= rect.startY + rect.height;
+            }
+
+            function isPointInCircle(x, y, circle) {
+                const radius = Math.sqrt(Math.pow(circle.endX - circle.startX, 2) + Math.pow(circle.endY - circle.startY, 2));
+                const dx = x - circle.startX;
+                const dy = y - circle.startY;
+                return dx * dx + dy * dy <= radius * radius;
+            }
+
+            // Layer management
+            function addNewLayer() {
+                const newLayer = {
+                    name: `Capa ${getNextLayerNumber()}`,
+                    visible: true,
+                    objects: []
+                };
+                layers.push(newLayer);
+                currentLayerIndex = layers.length - 1;
+                updateLayersUI();
+                renderCanvas();
+            }
+
+            function updateLayersUI() {
+                layersList.innerHTML = '';
+                layers.forEach((layer, index) => {
+                    const layerItem = document.createElement('div');
+                    layerItem.className = `layer-item p-2 rounded cursor-pointer flex justify-between items-center ${index === currentLayerIndex ? 'active' : ''}`;
+                    layerItem.innerHTML = `
+                        <span>${layer.name}</span>
+                        <div class="flex space-x-1">
+                            <button class="toggle-visibility text-gray-500 hover:text-gray-700" data-index="${index}">
+                                ${layer.visible ? '👁️' : '👁️‍🗨️'}
+                            </button>
+                            <button class="delete-layer text-gray-500 hover:text-gray-700" data-index="${index}">🗑️</button>
+                        </div>
+                    `;
+                    layerItem.addEventListener('click', (e) => {
+                        if (!e.target.classList.contains('toggle-visibility') && 
+                            !e.target.classList.contains('delete-layer')) {
+                            currentLayerIndex = index;
+                            updateLayersUI();
+                        }
+                    });
+
+                    layerItem.querySelector('.toggle-visibility').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const idx = parseInt(e.target.dataset.index);
+                        layers[idx].visible = !layers[idx].visible;
+                        updateLayersUI();
+                        renderCanvas();
+                    });
+
+                    layerItem.querySelector('.delete-layer').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const idx = parseInt(e.target.dataset.index);
+                        if (layers.length > 1) {
+                            layers.splice(idx, 1);
+                            if (currentLayerIndex >= idx) {
+                                currentLayerIndex = Math.max(0, currentLayerIndex - 1);
+                            }
+                            updateLayerNames();
+                            updateLayersUI();
+                            renderCanvas();
+                        } else {
+                            alert('Debe haber al menos una capa');
+                        }
+                    });
+                    layersList.appendChild(layerItem);
+                });
+            }
+
+            function updateLayerNames() {
+                layers.forEach((layer, index) => {
+                    layer.name = `Capa ${index + 1}`;
+                });
+            }
+
+            function getNextLayerNumber() {
+                let maxNum = 0;
+                layers.forEach(layer => {
+                    const num = parseInt(layer.name.replace('Capa ', ''));
+                    if (!isNaN(num) && num > maxNum) {
+                        maxNum = num;
+                    }
+                });
+                return maxNum + 1;
+            }
+
+            // File operations
+            function saveDrawing(fileName = 'dibujo-minicad.json') {
+                const data = {
+                    layers: layers,
+                    currentLayerIndex: currentLayerIndex,
+                    scale: scale,
+                    offsetX: offsetX,
+                    offsetY: offsetY,
+                    name: fileName,
+                    timestamp: Date.now()
+                };
+                
+                let drawings = JSON.parse(localStorage.getItem('minicad-drawings') || '[]');
+                drawings.push(data);
+                localStorage.setItem('minicad-drawings', JSON.stringify(drawings));
+                
+                updateDrawingsList();
+                
+                const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+                const link = document.createElement('a');
+                link.download = fileName;
+                link.href = URL.createObjectURL(blob);
+                link.click();
+                
+                return data;
+            }
+
+            function openDrawing(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        layers = data.layers;
+                        currentLayerIndex = data.currentLayerIndex;
+                        scale = data.scale || 1;
+                        offsetX = data.offsetX || 0;
+                        offsetY = data.offsetY || 0;
+                        updateLayersUI();
+                        renderCanvas();
+                    } catch (error) {
+                        alert('Error al cargar el archivo: ' + error.message);
+                    }
+                };
+                reader.onerror = () => {
+                    alert('Error al leer el archivo');
+                };
+                reader.readAsText(file);
+            }
+
+            // Export functions
+            function updateExportOptions() {
+                const format = exportFormat.value;
+                let optionsHTML = '';
+                
+                switch(format) {
+                    case 'jpeg':
+                        optionsHTML = `
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Calidad (0-1)</label>
+                                <input type="number" id="jpeg-quality" min="0" max="1" step="0.1" value="0.92" class="w-full p-2 border rounded">
+                            </div>
+                            <div>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="jpeg-transparent" class="mr-2">
+                                    <span>Fondo transparente</span>
+                                </label>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'png':
+                        optionsHTML = `
+                            <div>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="png-transparent" checked class="mr-2">
+                                    <span>Fondo transparente</span>
+                                </label>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'pdf':
+                        optionsHTML = `
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Tamaño (mm)</label>
+                                <select id="pdf-size" class="w-full p-2 border rounded">
+                                    <option value="a4">A4 (210 × 297)</option>
+                                    <option value="a3">A3 (297 × 420)</option>
+                                    <option value="letter">Carta (216 × 279)</option>
+                                    <option value="custom">Personalizado</option>
+                                </select>
+                            </div>
+                            <div id="pdf-custom-size" class="hidden grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-sm font-medium mb-1">Ancho (mm)</label>
+                                    <input type="number" id="pdf-width" value="210" class="w-full p-2 border rounded">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-1">Alto (mm)</label>
+                                    <input type="number" id="pdf-height" value="297" class="w-full p-2 border rounded">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Orientación</label>
+                                <select id="pdf-orientation" class="w-full p-2 border rounded">
+                                    <option value="portrait">Vertical</option>
+                                    <option value="landscape">Horizontal</option>
+                                </select>
+                            </div>
+                        `;
+                        break;
+                }
+                
+                exportOptions.innerHTML = optionsHTML;
+                
+                if (format === 'pdf') {
+                    const pdfSize = document.getElementById('pdf-size');
+                    const customSize = document.getElementById('pdf-custom-size');
+                    
+                    pdfSize.addEventListener('change', () => {
+                        customSize.classList.toggle('hidden', pdfSize.value !== 'custom');
+                        
+                        if (pdfSize.value === 'a4') {
+                            document.getElementById('pdf-width').value = 210;
+                            document.getElementById('pdf-height').value = 297;
+                        } else if (pdfSize.value === 'a3') {
+                            document.getElementById('pdf-width').value = 297;
+                            document.getElementById('pdf-height').value = 420;
+                        } else if (pdfSize.value === 'letter') {
+                            document.getElementById('pdf-width').value = 216;
+                            document.getElementById('pdf-height').value = 279;
+                        }
+                    });
+                }
+            }
+
+            async function exportDrawing() {
+                const format = exportFormat.value;
+                let fileName = prompt("Nombre del archivo:", `dibujo-minicad.${format}`);
+                
+                if (!fileName) return;
+                
+                try {
+                    switch(format) {
+                        case 'png':
+                        case 'jpeg':
+                            exportAsImage(format, fileName);
+                            break;
+                            
+                        case 'svg':
+                            exportAsSVG(fileName);
+                            break;
+                            
+                        case 'pdf':
+                            await exportAsPDF(fileName);
+                            break;
+                            
+                        case 'json':
+                            saveDrawing(fileName);
+                            break;
+                    }
+                    
+                    exportModal.classList.add('hidden');
+                } catch (error) {
+                    alert(`Error al exportar: ${error.message}`);
+                    console.error(error);
+                }
+            }
+
+            function exportAsImage(format, fileName) {
+                const padding = 20;
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                
+                layers.forEach(layer => {
+                    if (!layer.visible) return;
+                    
+                    layer.objects.forEach(obj => {
+                        if (obj.type === 'line') {
+                            minX = Math.min(minX, obj.startX, obj.endX);
+                            minY = Math.min(minY, obj.startY, obj.endY);
+                            maxX = Math.max(maxX, obj.startX, obj.endX);
+                            maxY = Math.max(maxY, obj.startY, obj.endY);
+                        } else if (obj.type === 'rect') {
+                            minX = Math.min(minX, obj.startX);
+                            minY = Math.min(minY, obj.startY);
+                            maxX = Math.max(maxX, obj.startX + obj.width);
+                            maxY = Math.max(maxY, obj.startY + obj.height);
+                        } else if (obj.type === 'circle') {
+                            const radius = Math.sqrt(
+                                Math.pow(obj.endX - obj.startX, 2) + 
+                                Math.pow(obj.endY - obj.startY, 2)
+                            );
+                            minX = Math.min(minX, obj.startX - radius);
+                            minY = Math.min(minY, obj.startY - radius);
+                            maxX = Math.max(maxX, obj.startX + radius);
+                            maxY = Math.max(maxY, obj.startY + radius);
+                        } else if (obj.type === 'image') {
+                            minX = Math.min(minX, obj.x);
+                            minY = Math.min(minY, obj.y);
+                            maxX = Math.max(maxX, obj.x + obj.width);
+                            maxY = Math.max(maxY, obj.y + obj.height);
+                        }
+                    });
+                });
+                
+                if (!isFinite(minX)) {
+                    minX = minY = 0;
+                    maxX = maxY = 500;
+                }
+                
+                const width = maxX - minX + padding * 2;
+                const height = maxY - minY + padding * 2;
+                
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = width;
+                tempCanvas.height = height;
+                
+                if (format === 'jpeg' && !document.getElementById('jpeg-transparent')?.checked) {
+                    tempCtx.fillStyle = '#ffffff';
+                    tempCtx.fillRect(0, 0, width, height);
+                } else if (format === 'png' && !document.getElementById('png-transparent')?.checked) {
+                    tempCtx.fillStyle = '#ffffff';
+                    tempCtx.fillRect(0, 0, width, height);
+                }
+                
+                layers.forEach(layer => {
+                    if (!layer.visible) return;
+                    
+                    layer.objects.forEach(obj => {
+                        const adjustedObj = {...obj};
+                        
+                        if (obj.type === 'line') {
+                            adjustedObj.startX = obj.startX - minX + padding;
+                            adjustedObj.startY = obj.startY - minY + padding;
+                            adjustedObj.endX = obj.endX - minX + padding;
+                            adjustedObj.endY = obj.endY - minY + padding;
+                        } else if (obj.type === 'rect' || obj.type === 'image') {
+                            adjustedObj.startX = obj.startX - minX + padding;
+                            adjustedObj.startY = obj.startY - minY + padding;
+                        } else if (obj.type === 'circle') {
+                            adjustedObj.startX = obj.startX - minX + padding;
+                            adjustedObj.startY = obj.startY - minY + padding;
+                            adjustedObj.endX = obj.endX - minX + padding;
+                            adjustedObj.endY = obj.endY - minY + padding;
+                        }
+                        
+                        drawObjectOnContext(adjustedObj, tempCtx);
+                    });
+                });
+                
+                const quality = format === 'jpeg' ? parseFloat(document.getElementById('jpeg-quality').value) || 0.92 : 1;
+                const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+                
+                tempCanvas.toBlob(blob => {
+                    const link = document.createElement('a');
+                    link.download = fileName;
+                    link.href = URL.createObjectURL(blob);
+                    link.click();
+                }, mimeType, quality);
+            }
+
+            function exportAsSVG(fileName) {
+                const padding = 20;
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                
+                layers.forEach(layer => {
+                    if (!layer.visible) return;
+                    
+                    layer.objects.forEach(obj => {
+                        if (obj.type === 'line') {
+                            minX = Math.min(minX, obj.startX, obj.endX);
+                            minY = Math.min(minY, obj.startY, obj.endY);
+                            maxX = Math.max(maxX, obj.startX, obj.endX);
+                            maxY = Math.max(maxY, obj.startY, obj.endY);
+                        } else if (obj.type === 'rect') {
+                            minX = Math.min(minX, obj.startX);
+                            minY = Math.min(minY, obj.startY);
+                            maxX = Math.max(maxX, obj.startX + obj.width);
+                            maxY = Math.max(maxY, obj.startY + obj.height);
+                        } else if (obj.type === 'circle') {
+                            const radius = Math.sqrt(
+                                Math.pow(obj.endX - obj.startX, 2) + 
+                                Math.pow(obj.endY - obj.startY, 2)
+                            );
+                            minX = Math.min(minX, obj.startX - radius);
+                            minY = Math.min(minY, obj.startY - radius);
+                            maxX = Math.max(maxX, obj.startX + radius);
+                            maxY = Math.max(maxY, obj.startY + radius);
+                        } else if (obj.type === 'image') {
+                            minX = Math.min(minX, obj.x);
+                            minY = Math.min(minY, obj.y);
+                            maxX = Math.max(maxX, obj.x + obj.width);
+                            maxY = Math.max(maxY, obj.y + obj.height);
+                        }
+                    });
+                });
+                
+                if (!isFinite(minX)) {
+                    minX = minY = 0;
+                    maxX = maxY = 500;
+                }
+                
+                const width = maxX - minX + padding * 2;
+                const height = maxY - minY + padding * 2;
+                
+                let svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" 
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="${width}px" height="${height}px" 
+     viewBox="0 0 ${width} ${height}">
+    <rect width="100%" height="100%" fill="white"/>
+`;
+
+                layers.forEach(layer => {
+                    if (!layer.visible) return;
+                    
+                    layer.objects.forEach(obj => {
+                        const x1 = obj.startX - minX + padding;
+                        const y1 = obj.startY - minY + padding;
+                        const x2 = obj.endX - minX + padding;
+                        const y2 = obj.endY - minY + padding;
+                        
+                        switch(obj.type) {
+                            case 'line':
+                                svgContent += `    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" 
+        stroke="${obj.color}" stroke-width="${obj.lineWidth}"/>\n`;
+                                if (obj.text) {
+                                    const midX = (x1 + x2) / 2;
+                                    const midY = (y1 + y2) / 2;
+                                    svgContent += `    <text x="${midX + 5}" y="${midY}" 
+        fill="${obj.color}" font-family="Arial" font-size="${Math.min(16, Math.max(8, obj.lineWidth + 4))}">
+        ${obj.text}</text>\n`;
+                                }
+                                break;
+                                
+                            case 'rect':
+                                svgContent += `    <rect x="${x1}" y="${y1}" width="${obj.width}" height="${obj.height}" 
+        stroke="${obj.color}" stroke-width="${obj.lineWidth}" fill="none"/>\n`;
+                                if (obj.text) {
+                                    svgContent += `    <text x="${x1 + 5}" y="${y1 + 15}" 
+        fill="${obj.color}" font-family="Arial" font-size="${Math.min(16, Math.max(8, obj.lineWidth + 4))}">
+        ${obj.text}</text>\n`;
+                                }
+                                break;
+                                
+                            case 'circle':
+                                const radius = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+                                svgContent += `    <circle cx="${x1}" cy="${y1}" r="${radius}" 
+        stroke="${obj.color}" stroke-width="${obj.lineWidth}" fill="none"/>\n`;
+                                if (obj.text) {
+                                    svgContent += `    <text x="${x1 + radius + 5}" y="${y1}" 
+        fill="${obj.color}" font-family="Arial" font-size="${Math.min(16, Math.max(8, obj.lineWidth + 4))}">
+        ${obj.text}</text>\n`;
+                                }
+                                break;
+                                
+                            case 'image':
+                                svgContent += `    <image xlink:href="${obj.src}" x="${x1}" y="${y1}" 
+        width="${obj.width}" height="${obj.height}"/>\n`;
+                                break;
+                        }
+                    });
+                });
+                
+                svgContent += `</svg>`;
+                
+                const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+                const link = document.createElement('a');
+                link.download = fileName;
+                link.href = URL.createObjectURL(blob);
+                link.click();
+            }
+
+            async function exportAsPDF(fileName) {
+                if (typeof jsPDF === 'undefined') {
+                    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+                    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/svg2pdf.js/1.4.0/svg2pdf.umd.min.js');
+                }
+                
+                const tempSvg = document.createElement('div');
+                document.body.appendChild(tempSvg);
+                const svgString = exportAsSVG(fileName, true);
+                tempSvg.innerHTML = svgString;
+                const svgElement = tempSvg.querySelector('svg');
+                
+                const pdfSize = document.getElementById('pdf-size').value;
+                const orientation = document.getElementById('pdf-orientation').value;
+                
+                let width, height;
+                if (pdfSize === 'custom') {
+                    width = parseFloat(document.getElementById('pdf-width').value);
+                    height = parseFloat(document.getElementById('pdf-height').value);
+                } else {
+                    const sizes = {
+                        a4: [210, 297],
+                        a3: [297, 420],
+                        letter: [216, 279]
+                    };
+                    [width, height] = sizes[pdfSize];
+                }
+                
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({
+                    orientation: width > height ? 'landscape' : 'portrait',
+                    unit: 'mm',
+                    format: [width, height]
+                });
+                
+                await svg2pdf(svgElement, pdf, {
+                    xOffset: 0,
+                    yOffset: 0,
+                    scale: 1
+                });
+                
+                pdf.save(fileName);
+                document.body.removeChild(tempSvg);
+            }
+
+            function loadScript(src) {
+                return new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.onload = resolve;
+                    script.onerror = reject;
+                    document.head.appendChild(script);
+                });
+            }
+
+            // Home screen functions
+            function updateDrawingsList() {
+                const drawingsList = document.getElementById('drawings-list');
+                drawingsList.innerHTML = '';
+                
+                const drawings = JSON.parse(localStorage.getItem('minicad-drawings') || '[]');
+                
+                if (drawings.length === 0) {
+                    drawingsList.innerHTML = '<p class="col-span-3 text-center text-gray-500">No hay dibujos guardados</p>';
+                    return;
+                }
+                
+                drawings.forEach((drawing, index) => {
+                    const drawingItem = document.createElement('div');
+                    drawingItem.className = 'p-4 border rounded cursor-pointer hover:bg-gray-100 active:bg-gray-200';
+                    drawingItem.innerHTML = `
+                        <h3 class="font-bold truncate">${drawing.name}</h3>
+                        <p class="text-sm text-gray-500">${new Date(drawing.timestamp).toLocaleString()}</p>
+                    `;
+                    drawingItem.addEventListener('click', () => loadDrawing(index));
+                    drawingsList.appendChild(drawingItem);
+                });
+            }
+            
+            function loadDrawing(index) {
+                const drawings = JSON.parse(localStorage.getItem('minicad-drawings') || '[]');
+                if (index >= 0 && index < drawings.length) {
+                    const drawing = drawings[index];
+                    layers = drawing.layers;
+                    currentLayerIndex = drawing.currentLayerIndex;
+                    scale = drawing.scale || 1;
+                    offsetX = drawing.offsetX || 0;
+                    offsetY = drawing.offsetY || 0;
+                    
+                    document.getElementById('home-screen').style.display = 'none';
+                    document.getElementById('app-container').style.display = 'flex';
+                    initCanvas();
+                    mobileMenu.classList.add('hidden');
+                }
+            }
+            
+            // Event listeners
+            toolButtons.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.tool-btn').forEach(b => 
+                        b.classList.remove('active')
+                    );
+                    this.classList.add('active');
+                    currentTool = this.dataset.tool;
+                    canvas.style.cursor = currentTool === 'pan' ? 'grab' : 'default';
+                });
+            });
+
+            // Mobile tool buttons
+            document.querySelectorAll('#mobile-tools .tool-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('#mobile-tools .tool-btn').forEach(b => 
+                        b.classList.remove('active')
+                    );
+                    this.classList.add('active');
+                    currentTool = this.dataset.tool;
+                    canvas.style.cursor = currentTool === 'pan' ? 'grab' : 'default';
+                });
+            });
+
+            colorPicker.addEventListener('input', () => {
+                currentColor = colorPicker.value;
+            });
+
+            lineWidth.addEventListener('input', () => {
+                currentLineWidth = lineWidth.value;
+            });
+
+            importBtn.addEventListener('click', () => imageUpload.click());
+            
+            imageUpload.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        layers[currentLayerIndex].objects.push({
+                            type: 'image',
+                            x: 10,
+                            y: 10,
+                            width: img.width,
+                            height: img.height,
+                            src: e.target.result
+                        });
+                        renderCanvas();
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+
+            addLayerBtn.addEventListener('click', addNewLayer);
+
+            // File operations
+            openBtn.addEventListener('click', () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.addEventListener('change', openDrawing);
+                input.click();
+            });
+
+            mobileOpenBtn.addEventListener('click', () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.addEventListener('change', openDrawing);
+                input.click();
+                mobileMenu.classList.add('hidden');
+            });
+
+            saveBtn.addEventListener('click', () => {
+                const drawing = saveDrawing();
+                alert(`Dibujo "${drawing.name}" guardado!`);
+            });
+
+            mobileSaveBtn.addEventListener('click', () => {
+                const drawing = saveDrawing();
+                alert(`Dibujo "${drawing.name}" guardado!`);
+                mobileMenu.classList.add('hidden');
+            });
+
+            exportBtn.addEventListener('click', () => {
+                exportModal.classList.remove('hidden');
+                updateExportOptions();
+            });
+
+            mobileLayersBtn.addEventListener('click', () => {
+                document.getElementById('layers-panel').classList.toggle('hidden');
+                mobileMenu.classList.add('hidden');
+            });
+
+            mobileToolsBtn.addEventListener('click', () => {
+                document.getElementById('tools-panel').classList.toggle('hidden');
+                mobileMenu.classList.add('hidden');
+            });
+
+            mobileHomeBtn.addEventListener('click', () => {
+                document.getElementById('app-container').style.display = 'none';
+                document.getElementById('home-screen').style.display = 'flex';
+                mobileMenu.classList.add('hidden');
+                updateDrawingsList();
+            });
+
+            clearBtn.addEventListener('click', () => {
+                if (confirm('¿Estás seguro de que quieres limpiar la capa actual?')) {
+                    layers[currentLayerIndex].objects = [];
+                    renderCanvas();
+                }
+            });
+
+            // Export modal
+            exportFormat.addEventListener('change', updateExportOptions);
+            cancelExport.addEventListener('click', () => exportModal.classList.add('hidden'));
+            confirmExport.addEventListener('click', exportDrawing);
+
+            // Mobile menu
+            menuToggle.addEventListener('click', () => {
+                mobileMenu.classList.remove('hidden');
+            });
+
+            closeMenu.addEventListener('click', () => {
+                mobileMenu.classList.add('hidden');
+            });
+
+            mobileMenu.addEventListener('click', (e) => {
+                if (e.target === mobileMenu) {
+                    mobileMenu.classList.add('hidden');
+                }
+            });
+
+            // Canvas events
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('mouseup', handleMouseUp);
+            canvas.addEventListener('wheel', handleWheel);
+
+            // Initialize the app
+            document.getElementById('new-drawing-btn').addEventListener('click', () => {
+                // Reset state
+                layers = [{
+                    name: 'Capa 1',
+                    visible: true,
+                    objects: []
+                }];
+                currentLayerIndex = 0;
+                scale = 1;
+                offsetX = 0;
+                offsetY = 0;
+                
+                document.getElementById('home-screen').style.display = 'none';
+                document.getElementById('app-container').style.display = 'flex';
+                initCanvas();
+                updateLayersUI();
+            });
+            
+            updateDrawingsList();
+        });
+    </script>
+</body>
+</html>
